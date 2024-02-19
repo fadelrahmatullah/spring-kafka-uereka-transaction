@@ -11,6 +11,7 @@ import javax.transaction.Transactional;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.consumer.app.entity.LocationEntity;
@@ -26,6 +27,7 @@ import com.core.app.entity.TransactionEntity;
 import com.core.app.repository.BankAccountRepository;
 import com.core.app.repository.TransactionRepository;
 import com.core.app.response.Response;
+import com.core.app.util.ResponseUtil;
 import com.core.app.vo.LocationVo;
 
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +52,12 @@ public class ExecuteWork extends AbstractExecutor{
     @Autowired
     private SourceLocationClient sourceLocationClient;
 
+    @Autowired
+    private RedisTemplate<String,Object> redisTemplate;
+
+    @Autowired
+    private ResponseUtil responseUtil;
+
     private final Lock lock = new ReentrantLock();
 
     @Override
@@ -72,37 +80,45 @@ public class ExecuteWork extends AbstractExecutor{
     @Transactional
     protected void doWorkGetLocation(TaskEntity taskData) throws Exception {
 
-        Response<LocationVo> response;
-        TransactionEntity transaction;
         
         try {
 
+            lock.lock();
+            TransactionEntity transaction = new TransactionEntity();
+            
             Optional<TransactionEntity> transactionEntity = transactionRepository.findById(taskData.getTransactionId());
             transaction = transactionEntity.get();
             String ipAddress = transaction.getIpAddress();
+            Response<LocationVo> response;
             
-            try {
-                lock.lock();
+            boolean getHashIp = redisTemplate.hasKey(ipAddress);
+            if (getHashIp) {
+                LocationVo vo = new LocationVo();
+                vo = (LocationVo) redisTemplate.opsForValue().get(ipAddress);
+                response = responseUtil.generateResponseSuccess(vo);
+            
+            }else{
+
                 CompletableFuture<Response<LocationVo>> futureResponse = CompletableFuture.supplyAsync(() -> {
                     return sourceLocationClient.appProduceContollerGetLocation(ipAddress);
                 });
     
-                response = futureResponse.get();
+                response = futureResponse != null ? futureResponse.get() : null;
     
                 if (response == null || !response.getStatus().equals(ResponseStatus.SUCCESS)) {
-                    lock.unlock();
                     throw new RuntimeException("Response is Null Or Failed");
                 }
     
                 log.info("Response appProduceContollerGetLocation : {}", response);
-                this.insertLocation(response.getData(), transaction, taskData.getTaskId());
-            } finally{
-                lock.unlock();
+                redisTemplate.opsForValue().set(ipAddress, response.getData());
             }
 
+            this.insertLocation(response.getData(), transaction, taskData.getTaskId());  
+
         } catch (Exception e) {
-            log.info("Response appProduceContollerGetLocation : {}", e);
             throw new RuntimeException("Error appProduceContollerGetLocation : "+ e.getMessage());
+        }finally{
+            lock.unlock();
         }
         
 
@@ -141,7 +157,7 @@ public class ExecuteWork extends AbstractExecutor{
 
         log.info("INSERT LOCATION FOR TASK ID : {}", taskId);
         LocationEntity locationEntity = new LocationEntity();
-        BeanUtils.copyProperties(locationVo, locationEntity);
+        BeanUtils.copyProperties(locationVo, locationEntity, "id");
         locationEntity.setCity(locationVo.getTimezone());
         locationEntity.setProcessId(transaction.getProcessId());
         locationEntity.setTaskId(taskId);

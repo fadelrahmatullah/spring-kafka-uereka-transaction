@@ -8,6 +8,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +18,7 @@ import com.consumer.app.job.exec.TaskRunnable;
 import com.consumer.app.job.exec.ThirdPartyRunnable;
 import com.consumer.app.repository.TaskRepository;
 import com.consumer.app.service.TaskTransactionExecutor;
+import com.consumer.app.vo.LockJob;
 import com.core.app.constants.Constants;
 import com.core.app.entity.TransactionEntity;
 import com.core.app.entity.UserEntity;
@@ -39,11 +42,15 @@ public class FlowTask {
     private TransactionRepository transactionRepository;
 
     @Autowired
+    private DistributedLockHandler distributedLockHandler;
+
+    @Autowired
     private UserRepository userRepository;
 
+    public static final Logger logger = LoggerFactory.getLogger(FlowTask.class);
 
     private final Lock lock = new ReentrantLock();
-    private final Lock lock2 = new ReentrantLock();
+    private final LockJob lockJob = new LockJob("TransLock", "currentTrans");
 
     private List<TaskEntity> getTaskListProcess(){
         List<TaskEntity> resultTask = taskRepository.getTaskByStatus(Constants.PROCESS);
@@ -56,33 +63,34 @@ public class FlowTask {
     }
 
     public void flowExecute(){
-        
-        lock.lock();
+
         try {
 
-            List<TaskEntity> taskList = this.getTaskListProcess();
-            final int taskNum = taskList.size();
-            final CountDownLatch latch = new CountDownLatch(taskNum);
-
-            if (taskList.size() > 0) {
-                taskList.forEach(task -> {
-                    service.execute(() -> {
-                        try {
-                            new TaskRunnable(task, latch, taskTransactionExecutor).run();
-                        } catch (Exception e) {
-                            UserEntity user = userRepository.findById(task.getUserId()).get();
-                            this.updateTaskFailed(task, e.getMessage(), user.getUserName());
-
-                            TransactionEntity transactionEntity = transactionRepository.findById(task.getTaskId()).get();
-                            this.updateTransactionFailed(transactionEntity, e.getMessage());
-                        }
+            if (distributedLockHandler.tryLock(lockJob)) {
+                List<TaskEntity> taskList = this.getTaskListProcess();
+                final int taskNum = taskList.size();
+                final CountDownLatch latch = new CountDownLatch(taskNum);
+                if (taskList.size() > 0) {
+                    taskList.forEach(task -> {
+                        service.execute(() -> {
+                            try {
+                                new TaskRunnable(task, latch, taskTransactionExecutor).run();
+                            } catch (Exception e) {
+                                UserEntity user = userRepository.findById(task.getUserId()).get();
+                                this.updateTaskFailed(task, e.getMessage(), user.getUserName());
+    
+                                TransactionEntity transactionEntity = transactionRepository.findById(task.getTransactionId()).get();
+                                this.updateTransactionFailed(transactionEntity, e.getMessage());
+                            }
+                        });
                     });
-                });
+                }
+            }else{
+                logger.info("<< Job is Locking..");
             }
+            
         } catch (Exception e) {
             e.printStackTrace();
-        }finally {
-            lock.unlock();
         }
         
         
@@ -90,7 +98,7 @@ public class FlowTask {
 
     public void taskLocation(){
 
-        lock2.lock();
+        lock.lock();
         try {
             
             List<TaskEntity> taskList = this.getTaskLocation();
@@ -110,7 +118,7 @@ public class FlowTask {
         } catch (Exception e) {
             e.printStackTrace();
         }finally{
-            lock2.unlock();
+            lock.unlock();
         }
     }
     

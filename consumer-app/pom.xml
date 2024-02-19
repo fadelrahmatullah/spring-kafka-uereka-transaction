@@ -111,11 +111,6 @@
 		    <version>3.0.1</version>
 		    <scope>provided</scope>
 		</dependency>
-
-		<!-- <dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
-		</dependency> -->
 		<dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-eureka</artifactId>
@@ -147,21 +142,15 @@
 		</dependency>
 
 		<dependency>
-			<groupId>com.fasterxml.jackson.dataformat</groupId>
-			<artifactId>jackson-dataformat-yaml</artifactId>
-		</dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
 		<dependency>
-			<groupId>com.fasterxml.jackson.core</groupId>
-			<artifactId>jackson-databind</artifactId>
+			<groupId>redis.clients</groupId>
+			<artifactId>jedis</artifactId>
+			<version>3.7.0</version>
 		</dependency>
-		<dependency>
-			<groupId>com.fasterxml.jackson.core</groupId>
-			<artifactId>jackson-core</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>com.fasterxml.jackson.core</groupId>
-			<artifactId>jackson-annotations</artifactId>
-		</dependency>
+
 
 	</dependencies>
 
